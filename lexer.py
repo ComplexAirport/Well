@@ -295,9 +295,9 @@ class Parser:
     def __init__(self, tokens: list, error_stream: ErrorStream, namespace: base_types.Namespace):
         self.tokens = tokens
         self.phases: list = [
+            FunctionCallPhase,
             ProOperatorPhase,
             BaseTypeConverterPhase,
-            FunctionCallPhase,
             VariablePlacerPhase,
             OperatorPhase,
             VarDeclarationPhase,
@@ -349,6 +349,33 @@ class ParsingPhase:
             return self.tokens[k]
         else:
             return None
+
+
+class FunctionCallPhase(ParsingPhase):  # Phase where all function calls are executed
+    def start(self):
+        while self.token is not None:
+            next_tok = self.get_next()
+            if isinstance(self.token, WordToken) and isinstance(next_tok, ParenExprToken):
+                get_func: Function = self.namespace.search_func_by_name(self.token.value)
+                if not get_func:
+                    self.error_stream.add_error(UndefinedErrorException(
+                        f'Name \'{self.token.value}\' is not defined',
+                        self.token.start, next_tok.end, 'when function call was found'
+                    ))
+                else:
+                    local_namespace = self.namespace.copy()
+                    execute_command(get_func.code.value, self.token.start.loc, self.error_stream, local_namespace)
+
+                    self.idx += 1  # TODO: function is called here, the code should be executed
+
+            else:
+                self.result.append(self.token)
+
+            if self.error_stream.is_error:
+                break
+
+            self.advance()
+        return self.result
 
 
 class ProOperatorPhase(ParsingPhase):  # Phase where expressions inside parentheses are executed
@@ -415,31 +442,6 @@ class BaseTypeConverterPhase(ParsingPhase):
 
         else:
             return token
-
-
-class FunctionCallPhase(ParsingPhase):  # Phase where all function calls are executed
-    def start(self):
-        while self.token is not None:
-            next_tok = self.get_next()
-
-            if isinstance(self.token, WordToken) and isinstance(next_tok, ParenExprToken):
-                get_func = self.namespace.search_func_by_name(self.token.value)
-                if not get_func:
-                    self.error_stream.add_error(UndefinedErrorException(
-                        f'Name \'{self.token.value}\' is not defined',
-                        self.token.start, next_tok.end, 'when function call was found'
-                    ))
-                else:
-                    self.idx += 1  # TODO: function is called here, the code should be executed
-
-            else:
-                self.result.append(self.token)
-
-            if self.error_stream.is_error:
-                break
-
-            self.advance()
-        return self.result
 
 
 class VariablePlacerPhase(ParsingPhase):
@@ -715,3 +717,10 @@ def make_tokens(text: str, file_name: str, error_stream: ErrorStream, namespace:
     result = parser.start()
 
     return None if error_stream.is_error else result
+
+
+def execute_command(text: str, file_name: str, error_stream: ErrorStream, namespace: Namespace):
+    tokens = make_tokens(text, file_name, error_stream, namespace)
+
+    if error_stream.is_error:
+        return
