@@ -395,6 +395,12 @@ class BaseTypeConverterPhase(ParsingPhase):
                                        token.end)
 
             elif token.value == 'ref' and isinstance(next_tok, WordToken):
+                if not self.namespace.exists(next_tok.value):
+                    self.error_stream.add_error(ValueErrorException(
+                        f'Cannot create reference to undefined object',
+                        token.start, next_tok.end, 'when reference was found'
+                    ))
+                    return
                 self.idx += 1
                 return base_types.ReferenceType(next_tok.value, token.start, next_tok.end)
 
@@ -538,7 +544,11 @@ class VarDeclarationPhase(ParsingPhase):
                 self.declare_const()
 
             elif isinstance(next_tok, WordToken) and next_tok.value == '=':
-                self.declare_var()
+                if isinstance(self.token, ReferenceType):
+                    self.declare_from_ref()
+                else:
+                    self.declare_var()
+
 
             else:
                 self.result.append(self.token)
@@ -598,6 +608,9 @@ class VarDeclarationPhase(ParsingPhase):
 
         for _ in range(2):
             self.advance()
+
+    def declare_ref(self):
+        var_name = self.get_next()
 
     def check_declaration(self, var, is_const=False):
         # If there is nothing next to const keyword
@@ -677,7 +690,6 @@ class VarDeclarationPhase(ParsingPhase):
             if char not in string.digits + string.ascii_letters + '$_':
                 return False
         return True
-
 
 def make_tokens(text: str, file_name: str, error_stream: ErrorStream, namespace: base_types.Namespace):
     lex = Lexer(file_name, text, error_stream)
