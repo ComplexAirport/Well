@@ -21,11 +21,8 @@ def execute_command(cmd: str):
     error_stream = errors.ErrorStream()
 
     namespace = base_types.Namespace()
-    namespace.add_var(base_types.Variable(
-        'david', base_types.Number(decimal.Decimal(10), lexer.Position.null_pos(), lexer.Position.null_pos())
-    ))
 
-    code = ''' const a a'''
+    code = ''' (PI=10) + (PI=20)'''
 
     result = lexer.make_tokens(code, '<stdin>', error_stream, namespace)
     if error_stream.is_error:

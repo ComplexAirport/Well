@@ -275,7 +275,16 @@ class Namespace:
         return True if self.search_by_name(name) else False
 
     def remove_by_name(self, name: str):
-        pass
+        s_var = self.search_var_by_name(name)
+        s_const = self.search_const_by_name(name)
+        s_func = self.search_func_by_name(name)
+
+        if s_var:
+            self.variables.remove(s_var)
+        if s_const:
+            self.constants.remove(s_const)
+        if s_func:
+            self.functions.remove(s_func)
 
     def add_var(self, var: Variable):
         if isinstance(var, Variable):

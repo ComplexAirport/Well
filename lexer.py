@@ -1,6 +1,7 @@
 import decimal
 
 import base_types
+from base_types import *
 from errors import *
 from tokens import *
 
@@ -532,8 +533,13 @@ class VarDeclarationPhase(ParsingPhase):
     def start(self):
         while self.token is not None:
             # Check for constant declaration
+            next_tok = self.get_next()
             if isinstance(self.token, WordToken) and self.token.value == 'const':
                 self.declare_const()
+
+            elif isinstance(next_tok, WordToken) and next_tok.value == '=':
+                self.declare_var()
+
             else:
                 self.result.append(self.token)
 
@@ -547,8 +553,55 @@ class VarDeclarationPhase(ParsingPhase):
     def declare_const(self):
         var_name = self.get_next()
 
+        self.check_declaration(var_name, is_const=True)
+
+        if self.error_stream.is_error:
+            return
+
+        # Now parse the value
+        equal_sign = self.get_next(2)
+        if not isinstance(equal_sign, WordToken) or equal_sign.value != '=':
+            self.namespace.add_const(base_types.Constant(
+                var_name.value, base_types.Null(self.token.start, var_name.end)
+            ))
+            self.result.append(Null(self.token.start, var_name.end))
+            self.advance()
+            return
+
+        var_value = self.get_next(3)
+
+        self.check_var_value(var_value, var_name, equal_sign)
+        if self.error_stream.is_error:
+            return
+
+        self.namespace.remove_by_name(var_name.value)
+
+        self.namespace.add_const(Constant(var_name.value, var_value))
+        self.result.append(var_value)
+
+        for _ in range(3):
+            self.advance()
+
+    def declare_var(self):
+        self.check_declaration(self.token)
+        if self.error_stream.is_error:
+            return
+
+        equal_sign = self.get_next()
+        var_value = self.get_next(2)
+        self.check_var_value(var_value, self.token, equal_sign)
+        if self.error_stream.is_error:
+            return
+
+        self.namespace.add_var(Variable(self.token.value, var_value))
+        self.result.append(var_value)
+
+        for _ in range(2):
+            self.advance()
+
+    def check_declaration(self, var, is_const=False):
         # If there is nothing next to const keyword
-        if not var_name:
+        if is_const and not var:
             self.error_stream.add_error(SyntaxErrorException(
                 'Expected some name after const keyword',
                 self.token.start, self.token.end,
@@ -557,59 +610,65 @@ class VarDeclarationPhase(ParsingPhase):
             ))
             return
 
-        # If var_name is not a word, for example it is string or number
-        elif not isinstance(var_name, WordToken):
-            if isinstance(var_name, Token):
-                type_name = var_name.type
-                start_pos = var_name.start
-                end_pos = var_name.end
+        # If var is not a word, for example it is string or number
+        elif not isinstance(var, WordToken):
+            if isinstance(var, Token):
+                type_name = var.type
+                start_pos = var.start
+                end_pos = var.end
             else:
-                type_name = var_name.type_name
-                start_pos = var_name.start_pos
-                end_pos = var_name.end_pos
+                type_name = var.type_name
+                start_pos = var.start_pos
+                end_pos = var.end_pos
             # TODO: add array unpacking here
-            if isinstance(var_name, base_types.String):
-                hint = var_name.value
-            elif isinstance(var_name, base_types.Number):
-                hint = f'foo_{var_name.value}'
+            if isinstance(var, base_types.String):
+                hint = var.value
+            elif isinstance(var, base_types.Number):
+                hint = f'foo_{var.value}'
             else:
                 hint = 'foo'
 
             self.error_stream.add_error(SyntaxErrorException(
-                f'Constant name should be a word, not {type_name}',
+                'Constant' if is_const else 'Variable' + f' name should be a word, not {type_name}',
                 start_pos, end_pos,
-                'when constant declaration was found',
+                'when declaration was found',
                 hint
             ))
             return
 
         # Check variable name to be valid
-        elif not self.check_var_name(var_name.value):
+        elif not self.check_var_name(var.value):
             self.error_stream.add_error(SyntaxErrorException(
-                f'Name {var_name.value} is not valid for a constant or variable',
-                var_name.start, var_name.end,
-                'while parsing constant name'
+                f'Name {var.value} is not valid for a constant or variable',
+                var.start, var.end,
+                'while parsing declaration name'
             ))
             return
 
         # Check value to be in special variables
-        elif var_name.value in base_types.special_vars:
+        elif var.value in base_types.special_vars:
             self.error_stream.add_error(SyntaxErrorException(
-                f'Cannot assign to literal ({var_name.value})',
-                var_name.start, var_name.end,
-                'while parsing constant name'
+                f'Cannot assign to literal ({var.value})',
+                var.start, var.end,
+                'while parsing declaration name'
             ))
             return
-        # TODO: Check if constant name is already taken
 
-        # Now parse the value
-        equal_sign = self.get_next(2)
-        if not isinstance(equal_sign, WordToken) or equal_sign.value != '=':
-            self.namespace.add_const(base_types.Constant(
-                var_name.value, base_types.Null(self.token.start, var_name.end)
+        # Check if name is already a constant
+        elif self.namespace.search_const_by_name(var.value):
+            self.error_stream.add_error(ValueErrorException(
+                f'Name {var.value} is already taken by a constant',
+                var.start, var.end, 'when declaring ' + 'constant' if is_const else 'variable'
             ))
-            self.advance()
 
+    def check_var_value(self, var_value, var_name, equal_sign):
+        if not isinstance(var_value, Any) or var_value is None:
+            self.error_stream.add_error(SyntaxErrorException(
+                'Expected some value after = sign',
+                var_name.start, equal_sign.end,
+                'while assigning value to constant',
+                '= null'
+            ))
 
     def check_var_name(self, name: str):
         if name[0] in string.digits:
