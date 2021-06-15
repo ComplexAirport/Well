@@ -38,7 +38,7 @@ class Lexer:
                 self.set_start_pos()
 
             # Generate a number token
-            elif self.pos.char in Triggers.dot_digits and len(self.tok) == 1:
+            elif self.pos.char in string.digits and len(self.tok) == 1:
                 self.set_start_pos()
                 self.generate_number()
                 self.set_start_pos()
@@ -103,12 +103,8 @@ class Lexer:
 
     def generate_number(self):
         # 400'hello'
-        if self.pos.char == '.':
-            dot_count = 1
-            number = '0.'
-        else:
-            dot_count = 0
-            number = self.pos.char
+        dot_count = 0
+        number = self.pos.char
 
         self.pos.advance()
 
@@ -394,13 +390,7 @@ class BaseTypeConverterPhase(ParsingPhase):
                 return base_types.Bool(True if token.value == base_types.bool_true else False, token.start,
                                        token.end)
 
-            elif token.value == 'ref' and isinstance(next_tok, WordToken):
-                if not self.namespace.exists(next_tok.value):
-                    self.error_stream.add_error(ValueErrorException(
-                        f'Cannot create reference to undefined object',
-                        token.start, next_tok.end, 'when reference was found'
-                    ))
-                    return
+            elif token.value == 'ref' or token.value == '&' and isinstance(next_tok, WordToken):
                 self.idx += 1
                 return base_types.ReferenceType(next_tok.value, token.start, next_tok.end)
 
@@ -535,6 +525,15 @@ class OperatorPhase(ParsingPhase):  # Phase where expressions with operators lik
             self.result.append(result)
 
 
+def check_var_name(name: str):
+    if name[0] in string.digits:
+        return False
+    for char in name:
+        if char not in string.digits + string.ascii_letters + '$_':
+            return False
+    return True
+
+
 class VarDeclarationPhase(ParsingPhase):
     def start(self):
         while self.token is not None:
@@ -548,7 +547,6 @@ class VarDeclarationPhase(ParsingPhase):
                     self.declare_from_ref()
                 else:
                     self.declare_var()
-
 
             else:
                 self.result.append(self.token)
@@ -609,8 +607,30 @@ class VarDeclarationPhase(ParsingPhase):
         for _ in range(2):
             self.advance()
 
-    def declare_ref(self):
-        var_name = self.get_next()
+    def declare_from_ref(self):
+        var_name = self.token.name
+        search: Variable = self.namespace.search_by_name(var_name)
+        if not search:
+            self.error_stream.add_error(ValueErrorException(
+                f'Cannot assign to reference that refers to an undefined object',
+                self.token.start_pos, self.token.end_pos,
+                'while assigning to reference'
+            ))
+            return
+        assign_to = self.get_next(2)
+        if not isinstance(assign_to, Any):
+            eq_sign = self.get_next()
+            self.error_stream.add_error(SyntaxErrorException(
+                f'Expected some value to assign to',
+                self.token.start_pos, eq_sign.end,
+                'while assigning to reference'
+            ))
+            return
+
+        search.value = assign_to
+        self.result.append(assign_to)
+
+        self.idx += 2
 
     def check_declaration(self, var, is_const=False):
         # If there is nothing next to const keyword
@@ -650,7 +670,7 @@ class VarDeclarationPhase(ParsingPhase):
             return
 
         # Check variable name to be valid
-        elif not self.check_var_name(var.value):
+        elif not check_var_name(var.value):
             self.error_stream.add_error(SyntaxErrorException(
                 f'Name {var.value} is not valid for a constant or variable',
                 var.start, var.end,
@@ -683,13 +703,6 @@ class VarDeclarationPhase(ParsingPhase):
                 '= null'
             ))
 
-    def check_var_name(self, name: str):
-        if name[0] in string.digits:
-            return False
-        for char in name:
-            if char not in string.digits + string.ascii_letters + '$_':
-                return False
-        return True
 
 def make_tokens(text: str, file_name: str, error_stream: ErrorStream, namespace: base_types.Namespace):
     lex = Lexer(file_name, text, error_stream)
