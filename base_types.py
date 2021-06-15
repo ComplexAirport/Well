@@ -9,6 +9,10 @@ operators = [
 ]
 
 bool_values = 'true', 'false'
+bool_true = 'true'
+bool_false = 'false'
+null_value = 'null'
+special_vars = bool_true, bool_false, null_value
 
 
 class Any:
@@ -178,9 +182,20 @@ class ReferenceType(Any):
         super().__init__(TypeNames.ref_t, name, start_pos, end_pos)
 
 
+class Null(Any):
+    def __init__(self, start_pos, end_pos):
+        super().__init__(TypeNames.null_t, None, start_pos, end_pos)
+
+    def __repr__(self):
+        return null_value
+
+
 class Bool(Any):
     def __init__(self, value: bool, start_pos, end_pos):
         super().__init__(TypeNames.bool_t, value, start_pos, end_pos)
+
+    def __repr__(self):
+        return bool_true if self.value else bool_false
 
 
 class Array(Any):
@@ -199,6 +214,9 @@ class TypeNames:
     func_t = 'function'
     bool_t = 'bool'
     array_t = 'array'
+    null_t = 'null'
+
+
 # Other
 
 class Variable:
@@ -250,8 +268,23 @@ class Namespace:
                 self.search_var_by_name(name) or self.search_const_by_name(name) or self.search_func_by_name(name)
         )
 
+    def search_not_func(self, name: str):
+        return self.search_var_by_name(name) or self.search_const_by_name(name)
+
     def exists(self, name: str):
         return True if self.search_by_name(name) else False
 
     def remove_by_name(self, name: str):
         pass
+
+    def add_var(self, var: Variable):
+        if isinstance(var, Variable):
+            self.variables.append(var)
+        else:
+            raise Exception
+
+    def add_const(self, const: Constant):
+        if isinstance(const, Constant):
+            self.constants.append(const)
+        else:
+            raise Exception

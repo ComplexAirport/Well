@@ -301,7 +301,10 @@ class Parser:
             ProOperatorPhase,
             BaseTypeConverterPhase,
             FunctionCallPhase,
-            OperatorPhase
+            VariablePlacerPhase,
+            OperatorPhase,
+            VarDeclarationPhase,
+            VariablePlacerPhase
         ]
 
         self.error_stream = error_stream
@@ -385,8 +388,20 @@ class BaseTypeConverterPhase(ParsingPhase):
     def token_to_type(self, token: Token):
         next_tok = self.get_next()
 
-        if isinstance(token, WordToken) and token.value in base_types.bool_values:
-            return base_types.Bool(True if token.value == base_types.bool_values[0] else False, token.start, token.end)
+        if isinstance(token, WordToken):
+            if token.value in base_types.bool_values:
+                return base_types.Bool(True if token.value == base_types.bool_true else False, token.start,
+                                       token.end)
+
+            elif token.value == 'ref' and isinstance(next_tok, WordToken):
+                self.idx += 1
+                return base_types.ReferenceType(next_tok.value, token.start, next_tok.end)
+
+            elif token.value == 'null':
+                return base_types.Null(token.start, token.end)
+
+            else:
+                return token
 
         elif isinstance(token, NumberToken):
             dec = decimal.Decimal(token.value)
@@ -395,14 +410,10 @@ class BaseTypeConverterPhase(ParsingPhase):
         elif isinstance(token, StringToken):
             return base_types.String(token.value, token.start, token.end)
 
-        elif isinstance(token, WordToken) and token.value == 'ref' and isinstance(next_tok, WordToken):
-            self.idx += 1
-            return base_types.ReferenceType(next_tok.value, token.start, next_tok.end)
-
         # Generate an array
         elif isinstance(token, BracketExprToken):
             arr_tokens = make_tokens(token.value, token.start.loc, self.error_stream, self.namespace)
-            if arr_tokens:
+            if arr_tokens is not None:
                 return base_types.Array(arr_tokens, token.start, token.end)
 
         else:
@@ -437,6 +448,12 @@ class FunctionCallPhase(ParsingPhase):  # Phase where all function calls are exe
 class VariablePlacerPhase(ParsingPhase):
     def start(self):
         while self.token is not None:
+
+            if isinstance(self.token, WordToken) and (var := self.namespace.search_not_func(self.token.value)):
+                self.result.append(var.value)
+            else:
+                self.result.append(self.token)
+
             self.advance()
 
         return self.result
@@ -509,6 +526,98 @@ class OperatorPhase(ParsingPhase):  # Phase where expressions with operators lik
 
         else:
             self.result.append(result)
+
+
+class VarDeclarationPhase(ParsingPhase):
+    def start(self):
+        while self.token is not None:
+            # Check for constant declaration
+            if isinstance(self.token, WordToken) and self.token.value == 'const':
+                self.declare_const()
+            else:
+                self.result.append(self.token)
+
+            if self.error_stream.is_error:
+                return
+
+            self.advance()
+
+        return self.result
+
+    def declare_const(self):
+        var_name = self.get_next()
+
+        # If there is nothing next to const keyword
+        if not var_name:
+            self.error_stream.add_error(SyntaxErrorException(
+                'Expected some name after const keyword',
+                self.token.start, self.token.end,
+                'when constant declaration was found',
+                f'foo = '
+            ))
+            return
+
+        # If var_name is not a word, for example it is string or number
+        elif not isinstance(var_name, WordToken):
+            if isinstance(var_name, Token):
+                type_name = var_name.type
+                start_pos = var_name.start
+                end_pos = var_name.end
+            else:
+                type_name = var_name.type_name
+                start_pos = var_name.start_pos
+                end_pos = var_name.end_pos
+            # TODO: add array unpacking here
+            if isinstance(var_name, base_types.String):
+                hint = var_name.value
+            elif isinstance(var_name, base_types.Number):
+                hint = f'foo_{var_name.value}'
+            else:
+                hint = 'foo'
+
+            self.error_stream.add_error(SyntaxErrorException(
+                f'Constant name should be a word, not {type_name}',
+                start_pos, end_pos,
+                'when constant declaration was found',
+                hint
+            ))
+            return
+
+        # Check variable name to be valid
+        elif not self.check_var_name(var_name.value):
+            self.error_stream.add_error(SyntaxErrorException(
+                f'Name {var_name.value} is not valid for a constant or variable',
+                var_name.start, var_name.end,
+                'while parsing constant name'
+            ))
+            return
+
+        # Check value to be in special variables
+        elif var_name.value in base_types.special_vars:
+            self.error_stream.add_error(SyntaxErrorException(
+                f'Cannot assign to literal ({var_name.value})',
+                var_name.start, var_name.end,
+                'while parsing constant name'
+            ))
+            return
+        # TODO: Check if constant name is already taken
+
+        # Now parse the value
+        equal_sign = self.get_next(2)
+        if not isinstance(equal_sign, WordToken) or equal_sign.value != '=':
+            self.namespace.add_const(base_types.Constant(
+                var_name.value, base_types.Null(self.token.start, var_name.end)
+            ))
+            self.advance()
+
+
+    def check_var_name(self, name: str):
+        if name[0] in string.digits:
+            return False
+        for char in name:
+            if char not in string.digits + string.ascii_letters + '$_':
+                return False
+        return True
 
 
 def make_tokens(text: str, file_name: str, error_stream: ErrorStream, namespace: base_types.Namespace):

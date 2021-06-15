@@ -1,3 +1,5 @@
 .idea
 doc.txt
 code.txt
+__pycache__
+.gitignore
