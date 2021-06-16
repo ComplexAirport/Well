@@ -1,11 +1,16 @@
 import copy
+import decimal
 from decimal import Decimal
-
+from tokens import Position
 from errors import UnsupportedOperationException
 
 operators = [
     '+', '-', '/', '*', '^', '%',
     '>', '<', 'is', 'or', 'and'
+]
+
+unary_operators = [
+    '-', 'not'
 ]
 
 bool_values = 'true', 'false'
@@ -21,6 +26,7 @@ class Any:
         self.value = value
         self.start_pos = start_pos
         self.end_pos = end_pos
+        self.properties = Namespace()
 
     def __repr__(self):
         return f'{self.type_name}:{self.value}'
@@ -51,6 +57,10 @@ class Any:
     def operator_or(self, other): ...
 
     def operator_and(self, other): ...
+
+    def operator_unary_minus(self): ...
+
+    def operator_unary_not(self): ...
 
 
 class Number(Any):
@@ -170,10 +180,129 @@ class Number(Any):
         else:
             return None
 
+    def operator_unary_minus(self):
+        return Number(-self.value, self.start_pos, self.end_pos)
+
+    def operator_unary_not(self):
+        return Bool(not self.value, self.start_pos, self.end_pos)
+
 
 class String(Any):
     def __init__(self, value: str, start_pos, end_pos):
         super().__init__(TypeNames.string_t, value, start_pos, end_pos)
+
+    def operator_add(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value + other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_sub(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value - other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_mul(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value * other.value, self.start_pos, other.end_pos
+            )
+        # If number is multiplied by string
+        elif isinstance(other, String):
+            return String(
+                int(self.value) * other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_div(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value / other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_mod(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value % other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_pow(self, other):
+        if isinstance(other, Number):
+            return Number(
+                self.value ** other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_bigger(self, other):
+        if isinstance(other, Number):
+            return Bool(
+                self.value > other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_smaller(self, other):
+        if isinstance(other, Number):
+            return Bool(
+                self.value < other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return UnsupportedOperationException(
+                f'Unsupported operation + between {self.type_name} and {other.type_name}',
+                self.start_pos, other.end_pos, 'when adding two objects'
+            )
+
+    def operator_equal(self, other):
+        if isinstance(other, Number):
+            return Bool(
+                self.value == other.value, self.start_pos, other.end_pos
+            )
+        else:
+            return Bool(False, self.start_pos, other.end_pos)
+
+    def operator_and(self, other):
+        if isinstance(other, Any):
+            return Bool(bool(self.value) and bool(other.value), self.start_pos, other.end_pos)
+        else:
+            return None
+
+    def operator_or(self, other):
+        if isinstance(other, Any):
+            return Bool(bool(self.value) or bool(other.value), self.start_pos, other.end_pos)
+        else:
+            return None
 
 
 class ReferenceType(Any):
@@ -218,7 +347,6 @@ class TypeNames:
 
 
 # Other
-
 class Variable:
     def __init__(self, name: str, value: Any):
         self.name = name
@@ -297,3 +425,6 @@ class Namespace:
             self.constants.append(const)
         else:
             raise Exception
+
+    def copy(self):
+        return Namespace(self.variables.copy(), self.constants.copy(), self.functions.copy())

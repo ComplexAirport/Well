@@ -1,5 +1,3 @@
-import decimal
-
 import base_types
 from base_types import *
 from errors import *
@@ -23,7 +21,6 @@ class Lexer:
         is_comment = False
         while self.pos.char is not None:
             self.tok += self.pos.char
-
             if self.pos.char in ' \r\t\n':
                 self.check_for_word()
                 self.pos.advance()
@@ -299,6 +296,8 @@ class Parser:
             ProOperatorPhase,
             BaseTypeConverterPhase,
             VariablePlacerPhase,
+            MethodFieldPlacerPhase,
+            UnaryOperatorPhase,
             OperatorPhase,
             VarDeclarationPhase,
             VariablePlacerPhase
@@ -363,10 +362,11 @@ class FunctionCallPhase(ParsingPhase):  # Phase where all function calls are exe
                         self.token.start, next_tok.end, 'when function call was found'
                     ))
                 else:
+                    # TODO: function accepts arguments
                     local_namespace = self.namespace.copy()
                     execute_command(get_func.code.value, self.token.start.loc, self.error_stream, local_namespace)
 
-                    self.idx += 1  # TODO: function is called here, the code should be executed
+                    self.idx += 1
 
             else:
                 self.result.append(self.token)
@@ -456,6 +456,75 @@ class VariablePlacerPhase(ParsingPhase):
             self.advance()
 
         return self.result
+
+
+class MethodFieldPlacerPhase(ParsingPhase):
+    def start(self):
+        while self.token is not None:
+            next_tok = self.get_next()
+            if isinstance(self.token, Any) and isinstance(next_tok, WordToken) and next_tok.value == '.':
+                prop_name = self.get_next(2)
+
+                if not isinstance(prop_name, WordToken):
+                    pass  # TODO: return error expected some property
+
+                get_prop = self.token.properties.search_by_name(prop_name.value)
+                if not get_prop:
+                    self.error_stream.add_error(ValueErrorException(
+                        f'Object type {self.token.type_name} does not have property  \'{prop_name.value}\'',
+                        self.token.start_pos, prop_name.end, 'while getting property of object'
+                    ))
+                    return
+                else:
+                    self.idx += 2
+                    self.result.append(get_prop.value)
+
+
+            else:
+                self.result.append(self.token)
+
+            if self.error_stream.is_error:
+                return
+
+            self.advance()
+
+        return self.result
+
+
+class UnaryOperatorPhase(ParsingPhase):
+    def start(self):
+        while self.token is not None:
+            if isinstance(self.token, WordToken) and self.token.value in unary_operators:
+                un_var = self.get_next()
+                op = self.token.value
+                if op == '-':
+                    self.apply_operator(self.token, un_var, un_var.operator_unary_minus)
+                elif op == 'not':
+                    self.apply_operator(self.token, un_var, un_var.operator_unary_not)
+                self.idx += 1
+
+            else:
+                self.result.append(self.token)
+
+            if self.error_stream.is_error:
+                return
+
+            self.advance()
+
+        return self.result
+
+    def apply_operator(self, operator, right, func):
+        result = func()
+
+        if isinstance(result, Error):
+            self.error_stream.add_error(result)
+        elif not result:
+            self.error_stream.add_error(UnsupportedOperationException(
+                f'Unsupported unary operator {operator.value} for type {right.type_name}',
+                operator.start, right.end_pos
+            ))
+        else:
+            self.result.append(result)
 
 
 class OperatorPhase(ParsingPhase):  # Phase where expressions with operators like 1 + 1 are executed
